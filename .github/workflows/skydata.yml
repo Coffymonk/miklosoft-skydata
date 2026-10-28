@@ -1,0 +1,82 @@
+name: Sky data
+
+# Every 15 minutes: fetch the newest open satellite, radar and forecast data, make the
+# cloud-and-rain maps and publish them on GitHub Pages for the Sky planner's Radar tab.
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["skydata/**", ".github/workflows/skydata.yml", "requirements.txt", "site/**"]
+
+permissions:
+  contents: write      # the small status branch
+  pages: write
+  id-token: write
+
+concurrency:
+  group: skydata
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore the working state (recent pictures, forecasts, the accuracy tally)
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: skydata-state-${{ github.run_id }}
+          restore-keys: skydata-state-
+
+      - name: Make the maps
+        run: python -m skydata.run --state state --out out
+
+      - name: Keep the working state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: skydata-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Add the front page
+        run: |
+          cp site/index.html out/index.html
+          touch out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+      - name: Publish a small status report on the status branch
+        if: always()
+        run: |
+          mkdir -p /tmp/status && cd /tmp/status
+          git init -q -b status
+          cp "$GITHUB_WORKSPACE"/out/manifest.json "$GITHUB_WORKSPACE"/out/accuracy.json "$GITHUB_WORKSPACE"/out/log.json . 2>/dev/null || true
+          if [ -d "$GITHUB_WORKSPACE/out/preview" ]; then cp -r "$GITHUB_WORKSPACE/out/preview" .; fi
+          echo "${{ github.run_id }} $(date -u +%FT%TZ) ${{ job.status }}" > run.txt
+          git add -A
+          git -c user.name="skydata" -c user.email="actions@users.noreply.github.com" commit -qm "Status $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" status
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

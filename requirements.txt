@@ -1,0 +1,8 @@
+numpy>=2.0
+scipy>=1.13
+opencv-python-headless>=4.10
+h5py>=3.11
+pyproj>=3.6
+eccodes>=2.38
+requests>=2.32
+pillow>=10.4

@@ -1,0 +1,19 @@
+name: Keep the schedule alive
+
+# GitHub pauses scheduled workflows in a repository that has had no activity for 60 days.
+# Once a month this switches the Sky data workflow on again, without making any commit.
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/skydata.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
