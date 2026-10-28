@@ -55,8 +55,9 @@ def load_stats(state_dir):
 def score(state_dir, now, observed, land, stats, log):
     """Compare the forecasts made for `now` with the cloud seen now (0 clear, 1 cloud, 255 none)."""
     d = os.path.join(state_dir, "verify")
-    if not os.path.isdir(d) or observed is None:
-        return
+    if not os.path.isdir(d) or observed is None or stats.get("last") == now.isoformat():
+        return                       # nothing new seen since the last run
+    stats["last"] = now.isoformat()
     obs = observed.astype(np.float32)
     obs[observed == 255] = np.nan
     oc = _coarse(obs)

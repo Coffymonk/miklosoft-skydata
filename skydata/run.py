@@ -83,6 +83,7 @@ def main(argv=None):
     obs_t = [T - dt.timedelta(minutes=m) for m in range(PAST_MIN, -1, -15)]
     log["T"] = iso(T)
     satellite.prune(a.state, T - dt.timedelta(minutes=PAST_MIN + 60))
+    opera.prune(a.state, T - dt.timedelta(minutes=PAST_MIN + 60))
 
     # 2. models
     icon_run, icon_files = icon.fetch(T, AHEAD_H + 1, a.state, log)

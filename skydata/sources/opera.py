@@ -157,10 +157,17 @@ def frames(times, state_dir, log):
         if not hit:
             continue
         ft, key = hit
+        cache = os.path.join(state_dir, "radar", f"{ft:%Y%m%d%H%M}.npz")
+        if os.path.exists(cache):
+            out[t] = _unpack(np.load(cache)["c"])
+            log.setdefault("opera_used", []).append(ft.isoformat())
+            continue
         try:
             raw = net.get(BUCKET + key, timeout=90).content
             v, where = read(raw)
             out[t] = to_grid(v, where, state_dir)
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            np.savez_compressed(cache, c=_pack(out[t]))
             log.setdefault("opera_used", []).append(ft.isoformat())
             if "opera_where" not in log:
                 log["opera_where"] = {k: (str(v)[:120]) for k, v in where.items()}
@@ -168,6 +175,31 @@ def frames(times, state_dir, log):
         except Exception as e:  # one bad file must not stop the rest
             log.setdefault("opera_errors", []).append(f"{key}: {e}"[:200])
     return out
+
+
+def _pack(g):
+    """dBZ grid as bytes: 0 nothing detected, 1..254 = -31.5 ... 95 dBZ in half steps, 255 no radar."""
+    c = np.clip(np.round((np.nan_to_num(g, nan=0.0, neginf=-32.0) + 32.0) * 2.0), 1, 254).astype(np.uint8)
+    c[np.isneginf(g) | (np.nan_to_num(g, nan=0.0) <= -32.0)] = 0
+    c[np.isnan(g)] = 255
+    return c
+
+
+def _unpack(c):
+    g = c.astype(np.float32) / 2.0 - 32.0
+    g[c == 0] = -np.inf
+    g[c == 255] = np.nan
+    return g
+
+
+def prune(state_dir, keep_after):
+    d = os.path.join(state_dir, "radar")
+    if not os.path.isdir(d):
+        return
+    for fn in os.listdir(d):
+        m = re.match(r"(\d{12})\.npz$", fn)
+        if m and dt.datetime.strptime(m.group(1), "%Y%m%d%H%M").replace(tzinfo=dt.timezone.utc) < keep_after:
+            os.remove(os.path.join(d, fn))
 
 
 def rain_rate(dbz):
