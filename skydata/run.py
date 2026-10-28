@@ -220,6 +220,15 @@ def main(argv=None):
     gen = dt.datetime.now(UTC)
     tag = gen.strftime("%Y%m%dT%H%M")
     names, size = pack.write_tiles(a.out, frames, tag)
+    # keep the previous set published as well, so a website still fetching it is not cut off
+    import shutil
+    prev = os.path.join(a.state, "prev_tiles")
+    if os.path.isdir(prev):
+        for old in os.listdir(prev):
+            if old != tag:
+                shutil.copytree(os.path.join(prev, old), os.path.join(a.out, "tiles", old), dirs_exist_ok=True)
+        shutil.rmtree(prev, ignore_errors=True)
+    shutil.copytree(os.path.join(a.out, "tiles", tag), os.path.join(prev, tag))
     mu, mv = nowcast.motion_kmh(u, v, 64)
     year = T.year
     manifest = {
