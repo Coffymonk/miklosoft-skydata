@@ -80,4 +80,4 @@ python -m skydata.run --state state --out out
 
 stargazer@miklosoft.se
 
-The code is MIT licensed (see `LICENSE`). The data keeps its own licences, listed above.
+The code is MIT licensed (see `LICENSE`). The data keeps its own licences, listed above. 
