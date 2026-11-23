@@ -2,6 +2,11 @@
 
 The newest composites sit in a public 24-hour bucket. We list it, take the maximum-reflectivity
 (DBZH) composite nearest each wanted time and resample it onto our grid.
+
+Since the MeteoGate cloud outage of 11-12 Nov 2026, EUMETNET serves the 24-hour cache from a
+backup store at ECMWF, and the CloudFerro bucket gets no new composites. Both stores are listed
+every run; the one with the newest composite is used, and the other one is tried for a file
+that fails to download.
 """
 import io
 import os
@@ -16,11 +21,15 @@ from scipy import ndimage
 
 from .. import grid, net
 
-BUCKET = "https://s3.waw3-1.cloudferro.com/openradar-24h/"
+BUCKETS = (
+    "https://s3.waw3-1.cloudferro.com/openradar-24h/",                  # the usual store
+    "https://object-store.os-api.cci1.ecmwf.int/openradar-24h-backup/",  # backup since 12 Nov 2026
+)
+BUCKET = BUCKETS[0]
 NAME = re.compile(r"OPERA@(\d{8}T\d{4})@0@DBZH\.h5$")
 
 
-def list_files(day, after=None):
+def list_files(day, after=None, bucket=BUCKET):
     """{datetime: key} of the DBZH composites of one UTC day."""
     out, token = {}, None
     prefix = day.strftime("%Y/%m/%d/OPERA/COMP/")
@@ -30,7 +39,7 @@ def list_files(day, after=None):
             p["start-after"] = prefix + after
         if token:
             p["continuation-token"] = token
-        r = net.get(BUCKET, params=p, timeout=30)
+        r = net.get(bucket, params=p, timeout=30)
         root = ET.fromstring(r.content)
         ns = {"s": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
         q = (lambda n: "s:" + n) if ns else (lambda n: n)
@@ -46,17 +55,26 @@ def list_files(day, after=None):
     return out
 
 
-def available(now):
+def available_in(bucket, now):
     files = {}
     start = now - dt.timedelta(hours=3)
     for d in sorted({start.date(), now.date()}):
         day = dt.datetime.combine(d, dt.time(), dt.timezone.utc)
         after = start.strftime("OPERA@%Y%m%dT%H%M") if d == start.date() else None
         try:
-            files.update(list_files(day, after))
-        except net.FetchError:
+            files.update(list_files(day, after, bucket))
+        except (net.FetchError, ET.ParseError):
             pass
     return files
+
+
+def available(now, log=None):
+    """{datetime: key} from the store with the newest composite, and the stores in the order to try."""
+    found = [(b, available_in(b, now)) for b in BUCKETS]
+    if log is not None:
+        log["opera_stores"] = {b: (max(f).isoformat() if f else None) for b, f in found}
+    found.sort(key=lambda bf: max(bf[1]) if bf[1] else dt.datetime.min.replace(tzinfo=dt.timezone.utc), reverse=True)
+    return found[0][1], [b for b, _ in found]
 
 
 def nearest(files, t, tol_min=6):
@@ -148,7 +166,7 @@ def frames(times, state_dir, log):
     out = {}
     if not times:
         return out
-    files = available(max(times))
+    files, stores = available(max(times), log)
     log["opera_files"] = len(files)
     if files:
         log["opera_newest"] = max(files).isoformat()
@@ -163,7 +181,15 @@ def frames(times, state_dir, log):
             log.setdefault("opera_used", []).append(ft.isoformat())
             continue
         try:
-            raw = net.get(BUCKET + key, timeout=90).content
+            raw, err = None, None
+            for b in stores:
+                try:
+                    raw = net.get(b + key, timeout=90).content
+                    break
+                except net.FetchError as e:
+                    err = e
+            if raw is None:
+                raise err
             v, where = read(raw)
             out[t] = to_grid(v, where, state_dir)
             os.makedirs(os.path.dirname(cache), exist_ok=True)
