@@ -15,14 +15,15 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: skydata
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # One map run at a time. Only the build is serialised: a publish that hangs (as on
+    # 16 Nov 2026, "Waiting" for a week) must never hold up the next runs.
+    concurrency:
+      group: skydata
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +75,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only the newest set matters: a newer publish replaces one that is still waiting.
+    concurrency:
+      group: skydata-pages
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
